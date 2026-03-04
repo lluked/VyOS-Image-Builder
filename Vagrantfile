@@ -1,0 +1,103 @@
+Vagrant.configure("2") do |config|
+
+  # Box config
+  config.vm.box = "debian/bookworm64"
+  config.vm.box_version = "12.20250126.1"
+
+  # Mount image output directory
+  config.vm.synced_folder ".", "/vagrant", type: "virtualbox", disabled: true
+  config.vm.synced_folder "./images", "/vyos-image-output", type: "virtualbox", disabled: false
+
+  # Configure virtualBox settings
+  config.vm.provider "virtualbox" do |vb|
+    vb.name = "vyos_builder"
+    vb.memory = "8192"
+    vb.cpus = 4
+  end
+
+  # Update packages
+  config.vm.provision "shell", inline: <<-SHELL
+    apt-get update
+    apt-get upgrade -y
+  SHELL
+
+  # Install docker (only if not already installed)
+  config.vm.provision "shell", inline: <<-SHELL
+    set -e
+
+    if command -v docker >/dev/null 2>&1; then
+      echo "Docker already installed — skipping"
+      exit 0
+    fi
+
+    # Install required packages
+    apt-get install -y \
+      ca-certificates \
+      curl \
+      gnupg \
+      lsb-release
+
+    # Add docker GPG key
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg \
+      | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+    # Add docker repository
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+      https://download.docker.com/linux/debian $(lsb_release -cs) stable" \
+      > /etc/apt/sources.list.d/docker.list
+
+    # Install docker Engine
+    apt-get update
+    apt-get install -y \
+      docker-ce \
+      docker-ce-cli \
+      containerd.io \
+      docker-buildx-plugin \
+      docker-compose-plugin
+
+    # Add vagrant user to docker group
+    usermod -aG docker vagrant
+
+    # Enable and start Docker
+    systemctl enable docker
+    systemctl start docker
+  SHELL
+
+  # Clone or update vyos-build repo
+  config.vm.provision "shell", inline: <<-SHELL
+    set -e
+
+    if [ ! -d "vyos-build/.git" ]; then
+      git clone -b current --single-branch https://github.com/vyos/vyos-build
+    else
+      cd vyos-build
+      git checkout current
+      git pull --ff-only
+    fi
+  SHELL
+
+  # Pull the docker image
+  config.vm.provision "shell", inline: <<-SHELL
+    docker pull vyos/vyos-build:current
+  SHELL
+
+  # Build VyOS image with docker
+  config.vm.provision "shell", inline: <<-SHELL
+    set -e
+
+    cd vyos-build
+
+    docker run --rm --privileged \
+      -v "$PWD":/vyos \
+      -w /vyos \
+      vyos/vyos-build:current \
+      bash -c "make clean && ./build-vyos-image --architecture amd64 --custom-package 'open-vm-tools' --custom-package 'open-vm-tools-desktop' generic"
+  SHELL
+
+  # Move image to output mount
+  config.vm.provision "shell", inline: <<-SHELL
+    mv -v vyos-build/build/vyos-*.iso /vyos-image-output/
+  SHELL
+
+end
