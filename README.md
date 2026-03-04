@@ -1,4 +1,4 @@
-# Vagrant VYOS Builder
+# Vagrant VYOS Image Builder
 
 Build a VyOS image from source using vagrant
 
