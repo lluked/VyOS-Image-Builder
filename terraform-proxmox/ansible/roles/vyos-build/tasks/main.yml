@@ -1,0 +1,35 @@
+---
+
+- name: Install expect packages
+  ansible.builtin.apt:
+    name:
+      - expect
+    state: present
+    update_cache: true
+
+- name: Pull the VyOS Build docker image
+  community.docker.docker_image:
+    name: vyos/vyos-build
+    tag: current
+    source: pull
+
+- name: Clone the VyOS build repository
+  ansible.builtin.git:
+    repo: 'https://github.com/vyos/vyos-build.git'
+    dest: '/opt/vyos-build'   # target directory on the remote host
+    version: current          # branch or tag, e.g., 'main' or 'rolling'
+
+- name: Get custom packages for the hypervisor
+  ansible.builtin.debug:
+    msg: "custom_package_args: {{ custom_package_args }}"
+
+- name: Build VyOS image in Docker
+  ansible.builtin.shell: |
+    docker run --rm -it --privileged \
+      -v /opt/vyos-build:/vyos \
+      -w /vyos \
+      vyos/vyos-build:current \
+      bash -c "make clean && ./build-vyos-image --architecture amd64 {{ custom_package_args }} generic"
+  args:
+    chdir: /opt/vyos-build
+    executable: /bin/bash

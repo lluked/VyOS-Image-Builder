@@ -1,0 +1,8 @@
+
+- name: Build VyOS image
+  hosts: all
+  remote_user: ubuntu
+  become: true
+  roles:
+    - install_docker
+    - vyos-build

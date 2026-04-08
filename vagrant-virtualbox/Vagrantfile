@@ -6,7 +6,7 @@ Vagrant.configure("2") do |config|
 
   # Mount image output directory
   config.vm.synced_folder ".", "/vagrant", type: "virtualbox", disabled: true
-  config.vm.synced_folder "./images", "/vyos-image-output", type: "virtualbox", disabled: false
+  config.vm.synced_folder "./iso", "/vyos-image-output", type: "virtualbox", disabled: false
 
   # Configure virtualBox settings
   config.vm.provider "virtualbox" do |vb|
