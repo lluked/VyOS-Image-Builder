@@ -1,0 +1,7 @@
+# Proxmox API connection
+pm_api_url          = "https://(fqdn|ip_address):8006/api2/json"
+pm_user             = "user@realm"
+pm_api_token_id     = "token_id"
+pm_api_token_secret = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+pm_tls_insecure     = true
+vm_public_key_file  = "/full/path/to/.ssh/id_rsa.pub"

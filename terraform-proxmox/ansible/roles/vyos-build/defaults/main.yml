@@ -1,0 +1,19 @@
+---
+
+hypervisor: proxmox
+
+hypervisor_package_map:
+  proxmox: qemu_packages
+  vmware: open_vm_tools_packages
+
+qemu_packages:
+  - qemu-guest-agent
+
+open_vm_tools_packages:
+  - open-vm-tools
+  - open-vm-tools-desktop
+
+custom_packages: "{{ lookup('vars', hypervisor_package_map[hypervisor]) }}"
+
+# Convert list to string: --custom-package 'pkg1' --custom-package 'pkg2'
+custom_package_args: "{{ custom_packages | map('quote') | map('regex_replace','^(.*)$','--custom-package \\1') | join(' ') }}"

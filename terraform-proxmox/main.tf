@@ -1,0 +1,147 @@
+
+terraform {
+  required_providers {
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = "0.100.0"
+    }
+  }
+}
+
+provider "proxmox" {
+  endpoint  = var.pm_api_url
+  username  = var.pm_user
+  password  = var.pm_password
+  api_token = var.pm_password == null && var.pm_api_token_id != null && var.pm_api_token_secret != null ? "${var.pm_user}!${var.pm_api_token_id}=${var.pm_api_token_secret}" : null
+  insecure = var.pm_tls_insecure
+  ssh {
+    username = "root"
+    private_key = file("${var.pm_private_key_file}")
+  }
+}
+
+resource "proxmox_download_file" "ubuntu_cloud_image" {
+  content_type = "import"
+  datastore_id = var.pm_storage_datastore
+  node_name    = var.pm_node
+  url          = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+  # need to rename the file to *.qcow2 to indicate the actual file format for import
+  file_name    = "noble-server-cloudimg-amd64.qcow2"
+}
+
+data "local_file" "ssh_public_key" {
+  filename = var.vm_public_key_file
+}
+
+resource "proxmox_virtual_environment_file" "user_data_cloud_config" {
+  content_type = "snippets"
+  datastore_id = var.pm_storage_datastore
+  node_name    = var.pm_node
+
+  source_raw {
+    data = <<-EOF
+    #cloud-config
+    hostname: vyos-image-builder
+    timezone: Etc/UTC
+    users:
+      - default
+      - name: ubuntu
+        groups:
+          - sudo
+        shell: /bin/bash
+        ssh_authorized_keys:
+          - ${trimspace(data.local_file.ssh_public_key.content)}
+        sudo: ALL=(ALL) NOPASSWD:ALL
+    package_update: true
+    packages:
+      - qemu-guest-agent
+      - net-tools
+      - curl
+    runcmd:
+      - systemctl enable qemu-guest-agent
+      - systemctl start qemu-guest-agent
+      - echo "done" > /tmp/cloud-config.done
+    EOF
+    file_name = "user-data-cloud-config.yaml"
+  }
+}
+
+resource "proxmox_virtual_environment_vm" "vyos_image_builder" {
+  name      = "vyos-image-builder"
+  node_name = var.pm_node
+
+  agent {
+    enabled = true
+  }
+
+  cpu {
+    sockets = 1
+    cores = 2
+  }
+
+  memory {
+    dedicated = 8192
+  }
+
+  disk {
+    datastore_id = var.pm_vm_datastore
+    import_from  = proxmox_download_file.ubuntu_cloud_image.id
+    interface    = "virtio0"
+    iothread     = true
+    discard      = "on"
+    size         = 40
+  }
+
+  initialization {
+  datastore_id = var.pm_storage_datastore  # for cloud-init ISO
+
+    ip_config {
+      ipv4 {
+        address = "dhcp"
+      }
+    }
+    user_data_file_id = proxmox_virtual_environment_file.user_data_cloud_config.id
+  }
+
+  network_device {
+    bridge = "vmbr0"
+  }
+
+  provisioner "local-exec" {
+    working_dir = "${path.module}/ansible"
+    command = <<EOT
+      ANSIBLE_HOST_KEY_CHECKING=False \
+      ansible-playbook -i '${self.ipv4_addresses[1][0]},' playbook.yml \
+      --user ubuntu \
+      --private-key ${var.pm_private_key_file}
+    EOT
+  }
+
+}
+
+resource "null_resource" "copy_vyos_iso_from_vm" {
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command = <<EOT
+      # VM SSH info
+      VM_USER="ubuntu"
+
+      echo "Finding latest VyOS ISO inside VM..."
+      ISO_FILE=$(ssh -o StrictHostKeyChecking=no -i "${var.pm_private_key_file}" "$VM_USER@${proxmox_virtual_environment_vm.vyos_image_builder.ipv4_addresses[1][0]}" "ls -1 /opt/vyos-build/build/vyos-*-amd64.iso | sort -V | tail -n1")
+
+      if [ -z "$ISO_FILE" ]; then
+        echo "No ISO found inside VM!"
+        exit 1
+      fi
+
+      ISO_DIR="${path.module}/iso"
+
+      mkdir -p "$ISO_DIR"
+
+      echo "Copying $ISO_FILE from VM to local directory..."
+      scp -o StrictHostKeyChecking=no -i "${var.pm_private_key_file}" "$VM_USER@${proxmox_virtual_environment_vm.vyos_image_builder.ipv4_addresses[1][0]}:$ISO_FILE" "$ISO_DIR/"
+
+      echo "Copied ISO to $ISO_DIR/$(basename $ISO_FILE)"
+    EOT
+  }
+}
