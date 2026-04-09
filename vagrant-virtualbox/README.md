@@ -1,17 +1,9 @@
-# Vagrant VYOS Image Builder
+# Vagrant Virtualbox
 
-Build a VyOS image from source using vagrant
-
-## Requirements
-- Virtualbox
+Create a VyOS iso using Vagrant and Virtualbox.
 
 ## Usage
 
 - `vagrant up`
-- image is outputted to `images` folder
-
-## Why?
- - Install custom packages such as `open-vm-tools`
- - No need for a physical build machine
- - Ease of use
- - Reproducable build environment
+- image is outputted to `iso` folder
+- `vagrant destroy`
